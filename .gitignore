@@ -1,1 +1,7 @@
 .idea/
+__pycache__/
+Controller/__pycache__/
+Data/__pycache__/
+Enc/__pycache__/
+Os/__pycache__/
+Ui/__pycache__/
