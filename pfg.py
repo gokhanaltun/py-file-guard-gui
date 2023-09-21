@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QMessageBox
+
+from Controller.pfg_controller import PfgController
 from Ui.PfgDesign import Ui_MainWindow
-from Enc import aes256, sha256
-from Os import fileOs
 
 
 class PfgWindow(QMainWindow):
@@ -13,9 +13,13 @@ class PfgWindow(QMainWindow):
 
         self.init_ui()
 
+        self.controller = PfgController()
+        self.observe_controller()
+
         self.file_paths = []
         self.output_folder = ""
         self.mode = "Encrypt"
+        self.key = ""
 
     def init_ui(self):
         self.ui.modeBox.currentTextChanged.connect(self.update_ui)
@@ -28,18 +32,49 @@ class PfgWindow(QMainWindow):
         self.mode = mode
         self.ui.btnEncDec.setText(mode)
 
+    def observe_controller(self):
+        self.controller.get_log_observable().subscribe(
+            on_next=lambda log_data: self.on_next(log_data))
+
+    def on_next(self, log_data: str):
+        if log_data == "complete":
+            self.on_complete()
+        else:
+            self.print_log(log_data)
+
+    def print_log(self, data: str):
+        self.ui.txtLog.append(data)
+
+    def on_complete(self):
+        self.file_paths = []
+        self.output_folder = ""
+        self.key = ""
+        self.mode = "Encrypt"
+        self.ui.modeBox.setCurrentIndex(0)
+        self.ui.inputKey.setText("")
+        self.print_log("\ncomplete\n")
+
+    def display_warning_message(self, message: str):
+        QMessageBox.warning(self, "Warning", message, QMessageBox.Ok)
+
+    def display_warning_message_with_yes_no(self, message: str):
+        reply = QMessageBox.warning(self, 'Warning', message,
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return reply
+
     def open_file_dialog(self):
         file_dialog = QFileDialog()
         file_dialog.FileMode = QFileDialog.ExistingFiles
 
-        files, _ = file_dialog.getOpenFileNames(self, "Select Files", "", "All Files (*)")
+        files, _ = file_dialog.getOpenFileNames(self,
+                                                "Select Files", "", "All Files (*)")
 
         if files:
             self.file_paths = files
-            self.ui.txtLog.append("\nSelected Files:\n")
+            self.print_log("\nSelected Files:\n")
 
             for file in files:
-                self.ui.txtLog.append("- " + file)
+                self.print_log("- " + file)
 
     def open_folder_dialog(self):
         folder_dialog = QFileDialog()
@@ -49,72 +84,32 @@ class PfgWindow(QMainWindow):
 
         if path:
             self.output_folder = path
-            self.ui.txtLog.append("\n Output Folder: " + path + "\n")
+            self.print_log("\n Output Folder: " + path + "\n")
 
     def check_requirements_and_continue(self):
         if not any(self.file_paths):
-            QMessageBox.warning(self, "Warning", "Please Select Files", QMessageBox.Ok)
+            self.display_warning_message("Please Select Files")
             return
 
         if self.ui.inputKey.text() == "":
-            QMessageBox.warning(self, "Warning", "Please Enter Your Key", QMessageBox.Ok)
+            self.display_warning_message("Please Enter Your Key")
             return
+        else:
+            self.key = self.ui.inputKey.text().encode("utf-8")
 
         if self.output_folder == "":
-            reply = QMessageBox.warning(self, 'Warning', 'No output path selected, files will be overwritten. Do you confirm?',
-                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            reply = self.display_warning_message_with_yes_no(
+                'No output path selected, files will be overwritten. Do you confirm?')
 
             if reply == QMessageBox.No:
-                QMessageBox.warning(self, "Warning", "Please Choose Output Path", QMessageBox.Ok)
+                self.display_warning_message("Please Choose Output Path")
                 return
 
         if self.mode == "Encrypt":
-            self.encrypt_files()
+            self.controller.encrypt_files(self.file_paths, self.key, self.output_folder)
 
         elif self.mode == "Decrypt":
-            self.decrypt_files()
-
-    def encrypt_files(self):
-        for file in self.file_paths:
-
-            file_bytes = fileOs.file_read_bytes(file)
-            if file_bytes.data is None:
-                self.ui.txtLog.append(f"\nfile read error: {file_bytes.error} {file}")
-            else:
-                hashed_password = sha256.hash_data(self.ui.inputKey.text().encode("utf-8"))
-
-                encrypted_data = aes256.encrypt(hashed_password, file_bytes.data)
-                if encrypted_data.data is None:
-                    self.ui.txtLog.append(f"\nencrypt error: {encrypted_data.error} {file}")
-                else:
-                    target_file_path = self.output_folder + "/" + file.split("/")[-1] if self.output_folder != "" else file
-                    result = fileOs.file_write_bytes(encrypted_data.data, target_file_path)
-
-                    if result.error:
-                        self.ui.txtLog.append(f"\nfile write error: {result.error} {target_file_path}")
-
-        self.ui.txtLog.append("\ncomplete\n")
-
-    def decrypt_files(self):
-        for file in self.file_paths:
-
-            file_bytes = fileOs.file_read_bytes(file)
-            if file_bytes.data is None:
-                self.ui.txtLog.append(f"\nfile read error: {file_bytes.error} {file}")
-            else:
-                hashed_password = sha256.hash_data(self.ui.inputKey.text().encode("utf-8"))
-
-                decrypted_data = aes256.decrypt(hashed_password, file_bytes.data)
-                if decrypted_data.data is None:
-                    self.ui.txtLog.append(f"\ndecrypt error: {decrypted_data.error} {file}")
-                else:
-                    target_file_path = self.output_folder + "/" + file.split("/")[-1] if self.output_folder != "" else file
-                    result = fileOs.file_write_bytes(decrypted_data.data, target_file_path)
-
-                    if result.error:
-                        self.ui.txtLog.append(f"\nfile write error: {result.error} {target_file_path}")
-
-        self.ui.txtLog.append("\ncomplete\n")
+            self.controller.decrypt_files(self.file_paths, self.key, self.output_folder)
 
 
 def main():
